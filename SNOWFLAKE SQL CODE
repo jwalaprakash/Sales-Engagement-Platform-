@@ -1,0 +1,487 @@
+create database sales ;
+create schema salesschema;
+
+-- MYSQL SNOWFLAKE CODE
+
+create database sales_task;
+create or replace schema sales;
+
+CREATE or replace TABLE Steps (
+    SequenceID INT,
+    StepNo INT,
+    StepType VARCHAR(50),
+    Day INT
+);
+
+select * from leads;
+select * from activities;
+truncate table activities;
+
+CREATE TABLE Leads (
+    LeadID INT,
+    Name VARCHAR(255),
+    EmailID VARCHAR(255),
+    Company VARCHAR(255),
+    Seniority VARCHAR(255),
+    Department VARCHAR(255)
+);    
+
+
+CREATE TABLE Sequences (
+    SequenceID INT,
+    SequenceName VARCHAR(255),
+    SequenceOwner VARCHAR(255)
+);  
+
+
+CREATE or replace TABLE activities (
+    LeadID INT,
+    SequenceID INT,
+    StepNo INT,
+    Status VARCHAR(50),
+    EmailOpened INT,
+    EmailReply INT,
+    EmailBounced INT,
+    CallAnswered INT,
+    LinkedinSuccess INT,
+    ReplyType VARCHAR(50)
+);
+
+
+###########################################################################
+-- 1. Engagement_rate
+
+SELECT
+    COUNT(DISTINCT L.LeadID) AS TotalLeads,
+    SUM(CASE WHEN A.ReplyType = 1 THEN 1 ELSE 0 END) AS PositiveResponses,
+    SUM(CASE WHEN A.ReplyType = 0 THEN 1 ELSE 0 END) AS NegativeResponses,
+    (SUM(CASE WHEN A.ReplyType = 1  or A.ReplyType = 0 THEN 1 ELSE 0 END) / COUNT(DISTINCT L.LEADID)) * 100 AS EngagementRate
+FROM
+    Leads L
+LEFT JOIN
+     Activities A ON L.LeadID = A.LeadID; -- OUTPUT IS 27.60 WHICH IS CORRECT OUTPUT
+
+
+-- THERE IS DIFFERENCE WHEN YOU PUT ACTIVITIES FIRST IN THE JOIN AND YOU GET DIFFERENT RESULT. EXECUTE BELOW CODE AND SEE
+-- THE DIFFERENCE IN RESULT
+
+
+SELECT
+    COUNT(DISTINCT L.LeadID) AS TotalLeads,
+    SUM(CASE WHEN A.ReplyType = 1 THEN 1 ELSE 0 END) AS PositiveResponses,
+    SUM(CASE WHEN A.ReplyType = 0 THEN 1 ELSE 0 END) AS NegativeResponses,
+    (SUM(CASE WHEN A.ReplyType = 1  or A.ReplyType = 0 THEN 1 ELSE 0 END) / COUNT(DISTINCT L.LEADID)) * 100 AS EngagementRate
+FROM
+    Activities A
+LEFT JOIN
+      Leads L ON L.LeadID = A.LeadID;  -- OUTPUT IS 34.5 % WHICH IS WRONG
+
+
+#############################################################################
+
+--2. Conversion Rate
+ SELECT
+    COUNT(DISTINCT L.LeadID) AS TotalLeads,
+    SUM(CASE WHEN A.ReplyType = 1 THEN 1 ELSE 0 END) AS PositiveResponses,
+    (SUM(CASE WHEN A.ReplyType = 1 THEN 1 ELSE 0 END) / COUNT(DISTINCT L.LeadID)) * 100 AS ConversionRate
+FROM
+    Leads L
+LEFT JOIN
+    Activities A ON L.LeadID = A.LeadID;
+-- note only join is not giving the correct answer, but left join is giving correct result , find out why.
+
+
+
+############################################################################################
+    --3. Lead Disqualification Rate:
+
+--    Monitor the rate at which leads are disqualified at each step of the sequence.
+
+SELECT
+    COUNT(DISTINCT L.LeadID) AS TotalLeads,
+    SUM(CASE WHEN A.ReplyType = 0 THEN 1 ELSE 0 END) AS NegativeResponses,
+    (SUM(CASE WHEN A.ReplyType = 0 THEN 1 ELSE 0 END) / COUNT(DISTINCT L.LeadID)) * 100 AS DisqualificationRate
+FROM
+    Leads L
+LEFT JOIN
+    Activities A ON L.LeadID = A.LeadID;   -- AGAIN ONLY JOIN WILL NOT WORK, USE LEFT JOIN AND Leds should be the left table.
+
+
+#############################################################################################
+4 -- Average Time to Reply:
+
+SELECT
+    s.SequenceID,
+    AVG(s.Day) AS AvgResponseTimeInDays
+FROM
+    Steps s
+JOIN
+    Activities a ON s.SequenceID = a.SequenceID AND s.StepNo = a.StepNo
+WHERE
+    a.ReplyType = 1 
+GROUP BY
+    s.SequenceID;
+
+
+##################################################################
+ -- 5 count of active leads
+
+select COUNT(*) from activities where status = 'Active';
+
+-- or
+
+SELECT
+    COUNT(DISTINCT a.LeadID) AS ActiveLeadsCount
+FROM
+    Activities a
+WHERE
+    a.Status = 'Active';
+
+
+-- 6 ######################## % COUNT OF ACTIVE LEADS ################
+
+
+with cte1 as (
+select count(leadid) as AL from activities where status = 'Active'
+
+),
+
+cte2 as (
+select count(distinct leadid) as TL from leads 
+)
+
+select (c1.AL/c2.TL)*100 
+from cte1 c1
+left join cte2 c2;
+
+
+-- M2 , OR BELOW CODE IS MORE READABLE
+
+WITH ActiveLeadCounts AS (
+    SELECT COUNT(DISTINCT LeadID) AS ActiveLeadCount
+    FROM Activities
+    WHERE Status = 'Active'
+),
+TotalLeadCounts AS (
+    SELECT COUNT(DISTINCT LeadID) AS TotalLeadCount
+    FROM Leads
+)
+
+SELECT (c1.ActiveLeadCount / c2.TotalLeadCount) * 100 AS ActiveLeadsPercentage
+FROM ActiveLeadCounts c1
+CROSS JOIN TotalLeadCounts c2;
+
+--############################################################
+
+-- 7 effectiveness of emails in generating positive responses,
+
+
+with cte1 as(
+select count(emailreply) as emailreply
+from activities
+where replytype = 1 and emailreply =1),
+
+cte2 as (
+select count(replytype) as TR from 
+activities where replytype = 1)
+
+select (c1.emailreply/c2.TR)*100 from
+cte1 c1
+join cte2 c2;
+
+
+
+-- 8 effectiveness of phone in generating positive responses
+with cte1 as(
+select count(callanswered) as PositiveCall
+from activities
+where callanswered = 1 and replytype =1),
+
+cte2 as (
+select count(replytype) as TR from 
+activities where replytype = 1)
+
+select (c1.PositiveCall/c2.TR)*100 from
+cte1 c1
+join cte2 c2;
+
+
+-- 9 effectiveness of linkedIn in generating positive responses
+
+
+with cte1 as(
+select count(linkedinsuccess) as Positivelinkedin
+from activities
+where linkedinsuccess = 1 and replytype =1),
+
+cte2 as (
+select count(replytype) as TR from 
+activities where replytype = 1)
+
+select (c1.Positivelinkedin/c2.TR)*100 from
+cte1 c1
+join cte2 c2;
+
+
+-- 10 Unsuccesful conversion Even after Engagement
+
+with cte1 as(
+select count(replytype) as USL from activities
+where (emailreply = 1 or callanswered = 1 or linkedinsuccess = 1) and replytype =0),
+
+cte2 as(
+    select count(replytype) as TPR FROM activities where replytype = 0 OR replytype = 1 )
+
+select  (c1.USL/c2.TPR)*100 as USLR 
+FROM cte1 c1
+left JOIN cte2 c2;
+
+
+
+
+
+-- 11  #############################################################################
+
+with cte1 as (
+SELECT leadid, stepno ,replytype from activities
+where replytype = 1),
+
+cte2 as (
+ select stepno, day from steps )
+
+ ;
+
+-- views
+
+-- view1 Engagement rate
+
+create view engagement_rate as
+
+SELECT
+    COUNT(DISTINCT L.LeadID) AS TotalLeads,
+    SUM(CASE WHEN A.ReplyType = 1 THEN 1 ELSE 0 END) AS PositiveResponses,
+    SUM(CASE WHEN A.ReplyType = 0 THEN 1 ELSE 0 END) AS NegativeResponses,
+    (SUM(CASE WHEN A.ReplyType = 1  or A.ReplyType = 0 THEN 1 ELSE 0 END) / COUNT(DISTINCT L.LEADID)) * 100 AS EngagementRate
+FROM
+    Leads L
+LEFT JOIN
+     Activities A ON L.LeadID = A.LeadID; -- OUTPUT IS 27.60 WHICH IS CORRECT OUTPUT
+
+
+
+--View2. Conversion Rate
+
+create view Conversion_rate as
+ SELECT
+    COUNT(DISTINCT L.LeadID) AS TotalLeads,
+    SUM(CASE WHEN A.ReplyType = 1 THEN 1 ELSE 0 END) AS PositiveResponses,
+    (SUM(CASE WHEN A.ReplyType = 1 THEN 1 ELSE 0 END) / COUNT(DISTINCT L.LeadID)) * 100 AS ConversionRate
+FROM
+    Leads L
+LEFT JOIN
+    Activities A ON L.LeadID = A.LeadID;
+-- note only join is not giving the correct answer, but left join is giving correct result , find out why.
+
+
+
+-- View 3. Lead Disqualification Rate:
+
+--    Monitor the rate at which leads are disqualified at each step of the sequence.
+
+create view Disqualification_rate as
+SELECT
+    COUNT(DISTINCT L.LeadID) AS TotalLeads,
+    SUM(CASE WHEN A.ReplyType = 0 THEN 1 ELSE 0 END) AS NegativeResponses,
+    (SUM(CASE WHEN A.ReplyType = 0 THEN 1 ELSE 0 END) / COUNT(DISTINCT L.LeadID)) * 100 AS DisqualificationRate
+FROM
+    Leads L
+LEFT JOIN
+    Activities A ON L.LeadID = A.LeadID;   -- AGAIN ONLY JOIN WILL NOT WORK, USE LEFT JOIN AND Leds should be the left table.
+
+
+--#############################################################################################
+-- View 4 Average Time to Reply:
+
+create view AverageReplyTime as
+SELECT
+    s.SequenceID,
+    AVG(s.Day) AS AvgResponseTimeInDays
+FROM
+    Steps s
+JOIN
+    Activities a ON s.SequenceID = a.SequenceID AND s.StepNo = a.StepNo
+WHERE
+    a.ReplyType = 1 
+GROUP BY
+    s.SequenceID;
+
+
+##################################################################
+ -- View 5 count of active leads
+
+select COUNT(*) from activities where status = 'Active';
+
+-- or
+create view Active_Leads as
+SELECT
+    COUNT(DISTINCT a.LeadID) AS ActiveLeadsCount
+FROM
+    Activities a
+WHERE
+    a.Status = 'Active';
+
+
+-- View 6 ######################## % COUNT OF ACTIVE LEADS ################
+
+
+with cte1 as (
+select count(leadid) as AL from activities where status = 'Active'
+
+),
+
+cte2 as (
+select count(distinct leadid) as TL from leads 
+)
+
+select (c1.AL/c2.TL)*100 
+from cte1 c1
+left join cte2 c2;
+
+
+-- M2 , OR BELOW CODE IS MORE READABLE
+create view Percentage_Active_Leads as
+WITH ActiveLeadCounts AS (
+    SELECT COUNT(DISTINCT LeadID) AS ActiveLeadCount
+    FROM Activities
+    WHERE Status = 'Active'
+),
+TotalLeadCounts AS (
+    SELECT COUNT(DISTINCT LeadID) AS TotalLeadCount
+    FROM Leads
+)
+
+SELECT (c1.ActiveLeadCount / c2.TotalLeadCount) * 100 AS ActiveLeadsPercentage
+FROM ActiveLeadCounts c1
+CROSS JOIN TotalLeadCounts c2;
+
+--############################################################
+
+-- View 7 effectiveness of emails in generating positive responses,
+
+create view email_effectiveness as
+with cte1 as(
+select count(emailreply) as emailreply
+from activities
+where replytype = 1 and emailreply =1),
+
+cte2 as (
+select count(replytype) as TR from 
+activities where replytype = 1)
+
+select (c1.emailreply/c2.TR)*100 from
+cte1 c1
+LEFT join cte2 c2;
+
+--
+CREATE VIEW email_effectiveness AS
+WITH cte1 AS (
+    SELECT COUNT(emailreply) AS emailreply
+    FROM activities
+    WHERE replytype = 1 AND emailreply = 1
+),
+cte2 AS (
+    SELECT COUNT(replytype) AS TR
+    FROM activities
+    WHERE replytype = 1
+)
+
+SELECT
+    CASE
+        WHEN c2.TR > 0 THEN (c1.emailreply / c2.TR) * 100
+        ELSE 0 -- or NULL, depending on your preference
+    END AS email_effectiveness
+FROM
+    cte1 c1
+LEFT JOIN cte2 c2 ON 1=1; 
+
+
+-- 8 effectiveness of phone in generating positive responses
+
+create view phone_effectiveness as
+with cte1 as(
+select count(callanswered) as PositiveCall
+from activities
+where callanswered = 1 and replytype =1),
+
+cte2 as (
+select count(replytype) as TR from 
+activities where replytype = 1)
+
+select CASE
+        WHEN c2.TR > 0 THEN (c1.PositiveCall / c2.TR) * 100
+        ELSE 0 -- or NULL, depending on your preference
+    END AS phone_effectiveness
+from
+cte1 c1
+LEFT join cte2 c2;
+
+
+-- 9 effectiveness of linkedIn in generating positive responses
+
+create view linkedIn_effectiveness as
+with cte1 as(
+select count(linkedinsuccess) as Positivelinkedin
+from activities
+where linkedinsuccess = 1 and replytype =1),
+
+cte2 as (
+select count(replytype) as TR from 
+activities where replytype = 1)
+
+select CASE
+        WHEN c2.TR > 0 THEN (c1.Positivelinkedin / c2.TR) * 100
+        ELSE 0 -- or NULL, depending on your preference
+    END AS phone_Positivelinkedin 
+from
+cte1 c1
+join cte2 c2;
+
+
+-- 10 Unsuccesful conversion Even after Engagement
+
+create view failed_engagement as
+with cte1 as(
+select count(replytype) as USL from activities
+where (emailreply = 1 or callanswered = 1 or linkedinsuccess = 1) and replytype =0),
+
+cte2 as(
+    select count(replytype) as TPR FROM activities where replytype = 0 OR replytype = 1 )
+
+select  (c1.USL/c2.TPR)*100 as USLR 
+FROM cte1 c1
+left JOIN cte2 c2;
+
+-- OR
+
+WITH FailedEngagement AS (
+    SELECT
+        COUNT(CASE WHEN (EmailReply = 1 OR CallAnswered = 1 OR LinkedinSuccess = 1) AND ReplyType = 0 THEN 1 END) AS failedeEngagementCount
+    FROM
+        Activities
+),
+TotalResponses AS (
+    SELECT
+        COUNT(CASE WHEN ReplyType IN (0, 1) THEN 1 END) AS TotalResponsesCount
+    FROM
+        Activities
+)
+
+SELECT
+    (UnsuccessfulLeadsCount / TotalResponsesCount) * 100 AS UnsuccessfulLeadsRate
+FROM
+    UnsuccessfulLeads c1
+LEFT JOIN
+    TotalResponses c2;
+
+
+
